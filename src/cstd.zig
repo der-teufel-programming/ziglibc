@@ -26,7 +26,7 @@ fn __main() callconv(.C) void {
     // TODO: call constructors
 }
 comptime {
-    if (builtin.os.tag == .windows) @export(__main, .{ .name = "__main" });
+    if (builtin.os.tag == .windows) @export(&__main, .{ .name = "__main" });
 }
 
 const windows = struct {
@@ -80,7 +80,7 @@ export fn exit(status: c_int) callconv(.C) noreturn {
             global.atexit_funcs.items[i - 1]();
         }
     }
-    std.os.exit(@intCast(status));
+    std.process.exit(@intCast(status));
 }
 
 const ExitFunc = switch (builtin.zig_backend) {
@@ -590,7 +590,7 @@ export fn signal(sig: c_int, func: SignalFn) callconv(.C) ?SignalFn {
 // stdio
 // --------------------------------------------------------------------------------
 const global = struct {
-    var rand: std.rand.DefaultPrng = undefined;
+    var rand: std.Random.DefaultPrng = undefined;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .MutexType = std.Thread.Mutex,
@@ -613,7 +613,7 @@ const global = struct {
     fn reserveFile() *c.FILE {
         var i: usize = 0;
         while (i < files_reserved.len) : (i += 1) {
-            if (!@atomicRmw(bool, &files_reserved[i], .Xchg, true, .SeqCst)) {
+            if (!@atomicRmw(bool, &files_reserved[i], .Xchg, true, .seq_cst)) {
                 return &files[i];
             }
         }
@@ -621,7 +621,7 @@ const global = struct {
     }
     fn releaseFile(file: *c.FILE) void {
         const i = (@intFromPtr(file) - @intFromPtr(&files[0])) / @sizeOf(usize);
-        if (!@atomicRmw(bool, &files_reserved[i], .Xchg, false, .SeqCst)) {
+        if (!@atomicRmw(bool, &files_reserved[i], .Xchg, false, .seq_cst)) {
             std.debug.panic("released FILE (i={} ptr={*}) that was not reserved", .{ i, file });
         }
     }
@@ -861,9 +861,9 @@ export fn freopen(filename: [*:0]const u8, mode: [*:0]const u8, stream: *c.FILE)
 export fn fclose(stream: *c.FILE) callconv(.C) c_int {
     trace.log("fclose {*}", .{stream});
     if (builtin.os.tag == .windows) {
-        std.os.close(stream.fd.?);
+        std.posix.close(stream.fd.?);
     } else {
-        std.os.close(stream.fd);
+        std.posix.close(stream.fd);
     }
     global.releaseFile(stream);
     return 0;
@@ -908,7 +908,7 @@ export fn rewind(stream: *c.FILE) callconv(.C) void {
 // TODO: why is there a putc and an fputc function? They seem to be equivalent
 //       so what's the history?
 comptime {
-    @export(fputc, .{ .name = "putc" });
+    @export(&fputc, .{ .name = "putc" });
 }
 
 export fn fputc(character: c_int, stream: *c.FILE) callconv(.C) c_int {
@@ -1293,7 +1293,7 @@ fn longjmp(env: c.jmp_buf, val: c_int) callconv(.C) noreturn {
 comptime {
     // temporary to get windows to link for now
     if (builtin.os.tag == .windows) {
-        @export(setjmp, .{ .name = "setjmp" });
-        @export(longjmp, .{ .name = "longjmp" });
+        @export(&setjmp, .{ .name = "setjmp" });
+        @export(&longjmp, .{ .name = "longjmp" });
     }
 }

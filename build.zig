@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     {
         const exe = b.addExecutable(.{
             .name = "genheaders",
-            .root_source_file = .{ .path = "src" ++ std.fs.path.sep_str ++ "genheaders.zig" },
+            .root_source_file = b.path("src/genheaders.zig"),
             .target = b.host,
         });
         const run = b.addRunArtifact(exe);
@@ -99,7 +99,7 @@ pub fn build(b: *std.Build) void {
 
     const test_env_exe = b.addExecutable(.{
         .name = "testenv",
-        .root_source_file = .{ .path = "test" ++ std.fs.path.sep_str ++ "testenv.zig" },
+        .root_source_file = b.path("test/testenv.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -187,9 +187,9 @@ pub fn build(b: *std.Build) void {
     _ = addYabfc(b, target, optimize, libc_only_std_static, zig_start, libc_only_posix, libc_only_gnu);
     _ = addSecretGame(b, target, optimize, libc_only_std_static, zig_start, libc_only_posix, libc_only_gnu);
     _ = awkbuild.addAwk(b, target, optimize, libc_only_std_static, libc_only_posix, zig_start);
-    _ = gnumakebuild.addGnuMake(b, target, optimize, libc_only_std_static, libc_only_posix, zig_start);
+    // _ = gnumakebuild.addGnuMake(b, target, optimize, libc_only_std_static, libc_only_posix, zig_start);
 
-    _ = @import("busybox/build.zig").add(b, target, optimize, libc_only_std_static, libc_only_posix);
+    // _ = @import("busybox/build.zig").add(b, target, optimize, libc_only_std_static, libc_only_posix);
     _ = @import("ncurses/build.zig").add(b, target, optimize, libc_only_std_static, libc_only_posix);
 }
 
@@ -202,7 +202,7 @@ fn installArtifact(b: *std.Build, artifact: anytype) *std.Build.Step.InstallArti
 
 fn addPosix(artifact: *std.Build.Step.Compile, zig_posix: *std.Build.Step.Compile) void {
     artifact.linkLibrary(zig_posix);
-    artifact.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "posix" });
+    artifact.addIncludePath(zig_posix.step.owner.path("inc/posix"));
 }
 
 fn addTest(
@@ -218,12 +218,12 @@ fn addTest(
         .target = target,
         .optimize = optimize,
     });
-    exe.addCSourceFile(.{ .file = .{ .path = "test" ++ std.fs.path.sep_str ++ name ++ ".c" } });
+    exe.addCSourceFile(.{ .file = b.path("test/" ++ name ++ ".c") });
     exe.addCSourceFiles(.{
-        .files = &.{"test" ++ std.fs.path.sep_str ++ "expect.c"},
+        .files = &.{"test/expect.c"},
     });
-    exe.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "libc" });
-    exe.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "posix" });
+    exe.addIncludePath(b.path("inc/libc"));
+    exe.addIncludePath(b.path("inc/posix"));
     exe.linkLibrary(libc_only_std_static);
     exe.linkLibrary(zig_start);
     // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
@@ -258,14 +258,18 @@ fn addLibcTest(
             .target = target,
             .optimize = optimize,
         });
-        lib.addCSourceFile(.{ .file = .{ .path = b.pathJoin(&.{ libc_test_path, "src", "api", name ++ ".c" }) } });
-        lib.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "libc" });
+        lib.addCSourceFile(.{ .file = .{ .cwd_relative = b.pathJoin(&.{ libc_test_path, "src", "api", name ++ ".c" }) } });
+        lib.addIncludePath(b.path("inc/libc"));
         lib.step.dependOn(&libc_test_repo.step);
         libc_test_step.dependOn(&lib.step);
     }
     const libc_inc_path = b.pathJoin(&.{ libc_test_path, "src", "common" });
     const common_src = &[_][]const u8{
-        b.pathJoin(&.{ libc_test_path, "src", "common", "print.c" }),
+        std.fs.path.relative(
+            b.allocator,
+            b.build_root.path orelse ".",
+            b.pathJoin(&.{ libc_test_path, "src", "common", "print.c" }),
+        ) catch @panic("OOM"),
     };
 
     // strtol, it seems there might be some disagreement between libc-test/glibc
@@ -276,12 +280,12 @@ fn addLibcTest(
             .target = target,
             .optimize = optimize,
         });
-        exe.addCSourceFile(.{ .file = .{ .path = b.pathJoin(&.{ libc_test_path, "src", "functional", name ++ ".c" }) } });
+        exe.addCSourceFile(.{ .file = .{ .cwd_relative = b.pathJoin(&.{ libc_test_path, "src", "functional", name ++ ".c" }) } });
         exe.addCSourceFiles(.{ .files = common_src });
         exe.step.dependOn(&libc_test_repo.step);
-        exe.addIncludePath(.{ .path = libc_inc_path });
-        exe.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "libc" });
-        exe.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "posix" });
+        exe.addIncludePath(.{ .cwd_relative = libc_inc_path });
+        exe.addIncludePath(b.path("inc/libc"));
+        exe.addIncludePath(b.path("inc/posix"));
         exe.linkLibrary(libc_only_std_static);
         exe.linkLibrary(zig_start);
         exe.linkLibrary(libc_only_posix);
@@ -302,52 +306,48 @@ fn addTinyRegexCTests(
     zig_start: *std.Build.Step.Compile,
     zig_posix: *std.Build.Step.Compile,
 ) void {
-    const repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/marler8997/tiny-regex-c",
-        .sha = "95ef2ad35d36783d789b0ade3178b30a942f085c",
-        .branch = "nocompile",
-        .fetch_enabled = true,
-    });
+    if (b.lazyDependency("tiny-regex-c", .{})) |tiny_regex_dep| {
+        const re_step = b.step("re-tests", "run the tiny-regex-c tests");
+        inline for (&[_][]const u8{ "test1", "test3" }) |test_name| {
+            const exe = b.addExecutable(.{
+                .name = "re" ++ test_name,
+                .target = target,
+                .optimize = optimize,
+            });
+            //b.installArtifact(exe);
+            // exe.step.dependOn(&repo.step);
+            // const repo_path = repo.getPath(&exe.step);
+            // var files = std.ArrayList([]const u8).init(b.allocator);
+            // const sources = [_][]const u8{
+            //     "re.c", "tests/" ++ test_name ++ ".c",
+            // };
+            // for (sources) |src| {
+            //     files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+            // }
 
-    const re_step = b.step("re-tests", "run the tiny-regex-c tests");
-    inline for (&[_][]const u8{ "test1", "test3" }) |test_name| {
-        const exe = b.addExecutable(.{
-            .name = "re" ++ test_name,
-            .target = target,
-            .optimize = optimize,
-        });
-        //b.installArtifact(exe);
-        exe.step.dependOn(&repo.step);
-        const repo_path = repo.getPath(&exe.step);
-        var files = std.ArrayList([]const u8).init(b.allocator);
-        const sources = [_][]const u8{
-            "re.c", "tests" ++ std.fs.path.sep_str ++ test_name ++ ".c",
-        };
-        for (sources) |src| {
-            files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+            exe.addCSourceFiles(.{
+                .root = tiny_regex_dep.path(""),
+                .files = &.{ "re.c", "tests/" ++ test_name ++ ".c" },
+                .flags = &[_][]const u8{"-std=c99"},
+            });
+            exe.addIncludePath(tiny_regex_dep.path(""));
+
+            exe.addIncludePath(b.path("inc/libc"));
+            exe.addIncludePath(b.path("inc/posix"));
+            exe.linkLibrary(libc_only_std_static);
+            exe.linkLibrary(zig_start);
+            exe.linkLibrary(zig_posix);
+            // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+            if (target.result.os.tag == .windows) {
+                exe.linkSystemLibrary("ntdll");
+                exe.linkSystemLibrary("kernel32");
+            }
+
+            //const step = b.step("re", "build the re (tiny-regex-c) tool");
+            //step.dependOn(&exe.install_step.?.step);
+            const run = b.addRunArtifact(exe);
+            re_step.dependOn(&run.step);
         }
-
-        exe.addCSourceFiles(.{
-            .files = files.toOwnedSlice() catch unreachable,
-            .flags = &[_][]const u8{"-std=c99"},
-        });
-        exe.addIncludePath(.{ .path = repo_path });
-
-        exe.addIncludePath(.{ .path = "inc/libc" });
-        exe.addIncludePath(.{ .path = "inc/posix" });
-        exe.linkLibrary(libc_only_std_static);
-        exe.linkLibrary(zig_start);
-        exe.linkLibrary(zig_posix);
-        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-        if (target.result.os.tag == .windows) {
-            exe.linkSystemLibrary("ntdll");
-            exe.linkSystemLibrary("kernel32");
-        }
-
-        //const step = b.step("re", "build the re (tiny-regex-c) tool");
-        //step.dependOn(&exe.install_step.?.step);
-        const run = b.addRunArtifact(exe);
-        re_step.dependOn(&run.step);
     }
 }
 
@@ -358,69 +358,75 @@ fn addLua(
     libc_only_std_static: *std.Build.Step.Compile,
     libc_only_posix: *std.Build.Step.Compile,
     zig_start: *std.Build.Step.Compile,
-) *std.Build.Step.Compile {
-    const lua_repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/lua/lua",
-        .sha = "5d708c3f9cae12820e415d4f89c9eacbe2ab964b",
-        .branch = "v5.4.4",
-        .fetch_enabled = true,
-    });
-    const lua_exe = b.addExecutable(.{
-        .name = "lua",
-        .target = target,
-        .optimize = optimize,
-    });
-    lua_exe.step.dependOn(&lua_repo.step);
-    const install = b.addInstallArtifact(lua_exe, .{});
-    // doesn't compile for windows for some reason
-    if (target.result.os.tag != .windows) {
-        b.getInstallStep().dependOn(&install.step);
-    }
-    const lua_repo_path = lua_repo.getPath(&lua_exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    files.append(b.pathJoin(&.{ lua_repo_path, "lua.c" })) catch unreachable;
-    inline for (luabuild.core_objects) |obj| {
-        files.append(b.pathJoin(&.{ lua_repo_path, obj ++ ".c" })) catch unreachable;
-    }
-    inline for (luabuild.aux_objects) |obj| {
-        files.append(b.pathJoin(&.{ lua_repo_path, obj ++ ".c" })) catch unreachable;
-    }
-    inline for (luabuild.lib_objects) |obj| {
-        files.append(b.pathJoin(&.{ lua_repo_path, obj ++ ".c" })) catch unreachable;
-    }
+) ?*std.Build.Step.Compile {
+    // const lua_repo = GitRepoStep.create(b, .{
+    //     .url = "https://github.com/lua/lua",
+    //     .sha = "5d708c3f9cae12820e415d4f89c9eacbe2ab964b",
+    //     .branch = "v5.4.4",
+    //     .fetch_enabled = true,
+    // });
+    if (b.lazyDependency("lua", .{})) |lua_dep| {
+        const lua_exe = b.addExecutable(.{
+            .name = "lua",
+            .target = target,
+            .optimize = optimize,
+        });
+        // lua_exe.step.dependOn(&lua_repo.step);
+        const install = b.addInstallArtifact(lua_exe, .{});
+        // doesn't compile for windows for some reason
+        if (target.result.os.tag != .windows) {
+            b.getInstallStep().dependOn(&install.step);
+        }
+        // const lua_repo_path = lua_repo.getPath(&lua_exe.step);
+        var files = std.ArrayList([]const u8).init(b.allocator);
+        files.append("lua.c") catch unreachable;
+        inline for (luabuild.core_objects) |obj| {
+            files.append(obj ++ ".c") catch unreachable;
+        }
+        inline for (luabuild.aux_objects) |obj| {
+            files.append(obj ++ ".c") catch unreachable;
+        }
+        inline for (luabuild.lib_objects) |obj| {
+            files.append(obj ++ ".c") catch unreachable;
+        }
 
-    lua_exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
-        .flags = &[_][]const u8{
-            "-nostdinc",
-            "-nostdlib",
-            "-std=c99",
-        },
-    });
+        lua_exe.addCSourceFiles(.{
+            .root = lua_dep.path(""),
+            .files = files.toOwnedSlice() catch unreachable,
+            .flags = &[_][]const u8{
+                "-nostdinc",
+                "-nostdlib",
+                "-std=c99",
+            },
+        });
 
-    lua_exe.addIncludePath(.{ .path = "inc" ++ std.fs.path.sep_str ++ "libc" });
-    lua_exe.linkLibrary(libc_only_std_static);
-    lua_exe.linkLibrary(libc_only_posix);
-    lua_exe.linkLibrary(zig_start);
-    // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-    if (target.result.os.tag == .windows) {
-        lua_exe.addIncludePath(.{ .path = "inc/win32" });
-        lua_exe.linkSystemLibrary("ntdll");
-        lua_exe.linkSystemLibrary("kernel32");
+        lua_exe.addIncludePath(b.path("inc/libc"));
+        lua_exe.linkLibrary(libc_only_std_static);
+        lua_exe.linkLibrary(libc_only_posix);
+        lua_exe.linkLibrary(zig_start);
+        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+        if (target.result.os.tag == .windows) {
+            lua_exe.addIncludePath(b.path("inc/win32"));
+            lua_exe.linkSystemLibrary("ntdll");
+            lua_exe.linkSystemLibrary("kernel32");
+        }
+
+        const step = b.step("lua", "build/install the LUA interpreter");
+        step.dependOn(&install.step);
+
+        const test_step = b.step("lua-test", "Run the lua tests");
+
+        const tests_path = lua_dep.path("testes");
+        for ([_][]const u8{ "bwcoercion.lua", "tracegc.lua" }) |test_file| {
+            var run_test = b.addRunArtifact(lua_exe);
+            // run_test.addArg(b.pathJoin(&.{ lua_repo_path, "testes", test_file }));
+            run_test.addFileArg(tests_path.join(b.allocator, test_file) catch unreachable);
+            test_step.dependOn(&run_test.step);
+        }
+
+        return lua_exe;
     }
-
-    const step = b.step("lua", "build/install the LUA interpreter");
-    step.dependOn(&install.step);
-
-    const test_step = b.step("lua-test", "Run the lua tests");
-
-    for ([_][]const u8{ "bwcoercion.lua", "tracegc.lua" }) |test_file| {
-        var run_test = b.addRunArtifact(lua_exe);
-        run_test.addArg(b.pathJoin(&.{ lua_repo_path, "testes", test_file }));
-        test_step.dependOn(&run_test.step);
-    }
-
-    return lua_exe;
+    return null;
 }
 
 fn addCmph(
@@ -430,63 +436,67 @@ fn addCmph(
     libc_only_std_static: *std.Build.Step.Compile,
     zig_start: *std.Build.Step.Compile,
     zig_posix: *std.Build.Step.Compile,
-) *std.Build.Step.Compile {
-    const repo = GitRepoStep.create(b, .{
-        //.url = "https://git.code.sf.net/p/cmph/git",
-        .url = "https://github.com/bonitao/cmph",
-        .sha = "abd5e1e17e4d51b3e24459ab9089dc0522846d0d",
-        .branch = null,
-        .fetch_enabled = true,
-    });
+) ?*std.Build.Step.Compile {
+    // const repo = GitRepoStep.create(b, .{
+    //     //.url = "https://git.code.sf.net/p/cmph/git",
+    //     .url = "https://github.com/bonitao/cmph#abd5e1e17e4d51b3e24459ab9089dc0522846d0d",
+    //     .branch = null,
+    //     .fetch_enabled = true,
+    // });
 
-    const config_step = b.addWriteFile(
-        b.pathJoin(&.{ repo.path, "src", "config.h" }),
-        "#define VERSION \"1.0\"",
-    );
-    config_step.step.dependOn(&repo.step);
+    if (b.lazyDependency("cmph", .{})) |cmph_dep| {
+        const config_h_path = cmph_dep.path("src/config.h");
+        const config_step = b.addWriteFile(
+            config_h_path.getPath(b),
+            "#define VERSION \"1.0\"",
+        );
+        // config_step.step.dependOn(&repo.step);
 
-    const exe = b.addExecutable(.{
-        .name = "cmph",
-        .target = target,
-        .optimize = optimize,
-    });
-    const install = installArtifact(b, exe);
-    exe.step.dependOn(&repo.step);
-    exe.step.dependOn(&config_step.step);
-    const repo_path = repo.getPath(&exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    const sources = [_][]const u8{
-        "main.c",        "cmph.c",         "hash.c",           "chm.c",             "bmz.c",          "bmz8.c",   "brz.c",          "fch.c",
-        "bdz.c",         "bdz_ph.c",       "chd_ph.c",         "chd.c",             "jenkins_hash.c", "graph.c",  "vqueue.c",       "buffer_manager.c",
-        "fch_buckets.c", "miller_rabin.c", "compressed_seq.c", "compressed_rank.c", "buffer_entry.c", "select.c", "cmph_structs.c",
-    };
-    for (sources) |src| {
-        files.append(b.pathJoin(&.{ repo_path, "src", src })) catch unreachable;
+        const exe = b.addExecutable(.{
+            .name = "cmph",
+            .target = target,
+            .optimize = optimize,
+        });
+        const install = installArtifact(b, exe);
+        // exe.step.dependOn(&repo.step);
+        exe.step.dependOn(&config_step.step);
+        // const repo_path = repo.getPath(&exe.step);
+        // var files = std.ArrayList([]const u8).init(b.allocator);
+        const sources = [_][]const u8{
+            "main.c",        "cmph.c",         "hash.c",           "chm.c",             "bmz.c",          "bmz8.c",   "brz.c",          "fch.c",
+            "bdz.c",         "bdz_ph.c",       "chd_ph.c",         "chd.c",             "jenkins_hash.c", "graph.c",  "vqueue.c",       "buffer_manager.c",
+            "fch_buckets.c", "miller_rabin.c", "compressed_seq.c", "compressed_rank.c", "buffer_entry.c", "select.c", "cmph_structs.c",
+        };
+        // for (sources) |src| {
+        //     files.append(b.pathJoin(&.{ repo_path, "src", src })) catch unreachable;
+        // }
+
+        exe.addCSourceFiles(.{
+            .root = cmph_dep.path(""),
+            .files = &sources,
+            .flags = &[_][]const u8{
+                "-std=c11",
+            },
+        });
+
+        exe.addIncludePath(b.path("inc/libc"));
+        exe.addIncludePath(b.path("inc/posix"));
+        exe.addIncludePath(b.path("inc/gnu"));
+        exe.linkLibrary(libc_only_std_static);
+        exe.linkLibrary(zig_start);
+        exe.linkLibrary(zig_posix);
+        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+        if (target.result.os.tag == .windows) {
+            exe.linkSystemLibrary("ntdll");
+            exe.linkSystemLibrary("kernel32");
+        }
+
+        const step = b.step("cmph", "build the cmph tool");
+        step.dependOn(&install.step);
+
+        return exe;
     }
-
-    exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
-        .flags = &[_][]const u8{
-            "-std=c11",
-        },
-    });
-
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/gnu" });
-    exe.linkLibrary(libc_only_std_static);
-    exe.linkLibrary(zig_start);
-    exe.linkLibrary(zig_posix);
-    // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-    if (target.result.os.tag == .windows) {
-        exe.linkSystemLibrary("ntdll");
-        exe.linkSystemLibrary("kernel32");
-    }
-
-    const step = b.step("cmph", "build the cmph tool");
-    step.dependOn(&install.step);
-
-    return exe;
+    return null;
 }
 
 fn addYacc(
@@ -496,75 +506,81 @@ fn addYacc(
     libc_only_std_static: *std.Build.Step.Compile,
     zig_start: *std.Build.Step.Compile,
     zig_posix: *std.Build.Step.Compile,
-) *std.Build.Step.Compile {
-    const repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/ibara/yacc",
-        .sha = "1a4138ce2385ec676c6d374245fda5a9cd2fbee2",
-        .branch = null,
-        .fetch_enabled = true,
-    });
+) ?*std.Build.Step.Compile {
+    // const repo = GitRepoStep.create(b, .{
+    //     .url = "https://github.com/ibara/yacc",
+    //     .sha = "1a4138ce2385ec676c6d374245fda5a9cd2fbee2",
+    //     .branch = null,
+    //     .fetch_enabled = true,
+    // });
 
-    const config_step = b.addWriteFile(b.pathJoin(&.{ repo.path, "config.h" }),
-        \\// for simplicity just don't supported __unused
-        \\#define __unused
-        \\// for simplicity we're just not supporting noreturn
-        \\#define __dead
-        \\//#define HAVE_PROGNAME
-        \\//#define HAVE_ASPRINTF
-        \\//#define HAVE_PLEDGE
-        \\//#define HAVE_REALLOCARRAY
-        \\#define HAVE_STRLCPY
-        \\
-    );
-    config_step.step.dependOn(&repo.step);
-    const gen_progname_step = b.addWriteFile(b.pathJoin(&.{ repo.path, "progname.c" }),
-        \\// workaround __progname not defined, https://github.com/ibara/yacc/pull/1
-        \\char *__progname;
-        \\
-    );
-    gen_progname_step.step.dependOn(&repo.step);
+    if (b.lazyDependency("yacc", .{})) |yacc_dep| {
+        const config_h_path = yacc_dep.path("config.h");
+        const config_step = b.addWriteFile(config_h_path.getPath(b),
+            \\// for simplicity just don't supported __unused
+            \\#define __unused
+            \\// for simplicity we're just not supporting noreturn
+            \\#define __dead
+            \\//#define HAVE_PROGNAME
+            \\//#define HAVE_ASPRINTF
+            \\//#define HAVE_PLEDGE
+            \\//#define HAVE_REALLOCARRAY
+            \\#define HAVE_STRLCPY
+            \\
+        );
+        // config_step.step.dependOn(&repo.step);
+        const progname_path = yacc_dep.path("progname.c");
+        const gen_progname_step = b.addWriteFile(progname_path.getPath(b),
+            \\// workaround __progname not defined, https://github.com/ibara/yacc/pull/1
+            \\char *__progname;
+            \\
+        );
+        // gen_progname_step.step.dependOn(&repo.step);
 
-    const exe = b.addExecutable(.{
-        .name = "yacc",
-        .target = target,
-        .optimize = optimize,
-    });
-    const install = installArtifact(b, exe);
-    exe.step.dependOn(&repo.step);
-    exe.step.dependOn(&config_step.step);
-    exe.step.dependOn(&gen_progname_step.step);
-    const repo_path = repo.getPath(&exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    const sources = [_][]const u8{
-        "closure.c",  "error.c",  "lalr.c",    "lr0.c",      "main.c",     "mkpar.c",    "output.c", "reader.c",
-        "skeleton.c", "symtab.c", "verbose.c", "warshall.c", "portable.c", "progname.c",
-    };
-    for (sources) |src| {
-        files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+        const exe = b.addExecutable(.{
+            .name = "yacc",
+            .target = target,
+            .optimize = optimize,
+        });
+        const install = installArtifact(b, exe);
+        // exe.step.dependOn(&repo.step);
+        exe.step.dependOn(&config_step.step);
+        exe.step.dependOn(&gen_progname_step.step);
+        // const repo_path = repo.getPath(&exe.step);
+        // var files = std.ArrayList([]const u8).init(b.allocator);
+        const sources = [_][]const u8{
+            "closure.c",  "error.c",  "lalr.c",    "lr0.c",      "main.c",     "mkpar.c",    "output.c", "reader.c",
+            "skeleton.c", "symtab.c", "verbose.c", "warshall.c", "portable.c", "progname.c",
+        };
+        // for (sources) |src| {
+        //     files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+        // }
+
+        exe.addCSourceFiles(.{
+            .root = yacc_dep.path(""),
+            .files = &sources,
+            .flags = &[_][]const u8{
+                "-std=c90",
+            },
+        });
+
+        exe.addIncludePath(b.path("inc/libc"));
+        exe.addIncludePath(b.path("inc/posix"));
+        exe.linkLibrary(libc_only_std_static);
+        exe.linkLibrary(zig_start);
+        exe.linkLibrary(zig_posix);
+        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+        if (target.result.os.tag == .windows) {
+            exe.linkSystemLibrary("ntdll");
+            exe.linkSystemLibrary("kernel32");
+        }
+
+        const step = b.step("yacc", "build the yacc tool");
+        step.dependOn(&install.step);
+
+        return exe;
     }
-
-    exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
-        .flags = &[_][]const u8{
-            "-std=c90",
-        },
-    });
-
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.linkLibrary(libc_only_std_static);
-    exe.linkLibrary(zig_start);
-    exe.linkLibrary(zig_posix);
-    // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-    if (target.result.os.tag == .windows) {
-        exe.linkSystemLibrary("ntdll");
-        exe.linkSystemLibrary("kernel32");
-    }
-
-    const step = b.step("yacc", "build the yacc tool");
-    step.dependOn(&install.step);
-
-    return exe;
+    return null;
 }
 
 fn addYabfc(
@@ -575,54 +591,57 @@ fn addYabfc(
     zig_start: *std.Build.Step.Compile,
     zig_posix: *std.Build.Step.Compile,
     zig_gnu: *std.Build.Step.Compile,
-) *std.Build.Step.Compile {
-    const repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/julianneswinoga/yabfc",
-        .sha = "a789be25a0918d330b7a4de12db0d33e0785f244",
-        .branch = null,
-        .fetch_enabled = true,
-    });
+) ?*std.Build.Step.Compile {
+    // const repo = GitRepoStep.create(b, .{
+    //     .url = "https://github.com/julianneswinoga/yabfc#a789be25a0918d330b7a4de12db0d33e0785f244",
+    //     .branch = null,
+    //     .fetch_enabled = true,
+    // });
 
-    const exe = b.addExecutable(.{
-        .name = "yabfc",
-        .target = target,
-        .optimize = optimize,
-    });
-    const install = installArtifact(b, exe);
-    exe.step.dependOn(&repo.step);
-    const repo_path = repo.getPath(&exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    const sources = [_][]const u8{
-        "assembly.c", "elfHelper.c", "helpers.c", "optimize.c", "yabfc.c",
-    };
-    for (sources) |src| {
-        files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+    if (b.lazyDependency("yabfc", .{})) |yabfc_dep| {
+        const exe = b.addExecutable(.{
+            .name = "yabfc",
+            .target = target,
+            .optimize = optimize,
+        });
+        const install = installArtifact(b, exe);
+        // exe.step.dependOn(&repo.step);
+        // const repo_path = repo.getPath(&exe.step);
+        // var files = std.ArrayList([]const u8).init(b.allocator);
+        const sources = [_][]const u8{
+            "assembly.c", "elfHelper.c", "helpers.c", "optimize.c", "yabfc.c",
+        };
+        // for (sources) |src| {
+        //     files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+        // }
+        exe.addCSourceFiles(.{
+            .root = yabfc_dep.path(""),
+            .files = &sources,
+            .flags = &[_][]const u8{
+                "-std=c99",
+            },
+        });
+
+        exe.addIncludePath(b.path("inc/libc"));
+        exe.addIncludePath(b.path("inc/posix"));
+        exe.addIncludePath(b.path("inc/linux"));
+        exe.addIncludePath(b.path("inc/gnu"));
+        exe.linkLibrary(libc_only_std_static);
+        exe.linkLibrary(zig_start);
+        exe.linkLibrary(zig_posix);
+        exe.linkLibrary(zig_gnu);
+        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+        if (target.result.os.tag == .windows) {
+            exe.linkSystemLibrary("ntdll");
+            exe.linkSystemLibrary("kernel32");
+        }
+
+        const step = b.step("yabfc", "build/install the yabfc tool (Yet Another BrainFuck Compiler)");
+        step.dependOn(&install.step);
+
+        return exe;
     }
-    exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
-        .flags = &[_][]const u8{
-            "-std=c99",
-        },
-    });
-
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/linux" });
-    exe.addIncludePath(.{ .path = "inc/gnu" });
-    exe.linkLibrary(libc_only_std_static);
-    exe.linkLibrary(zig_start);
-    exe.linkLibrary(zig_posix);
-    exe.linkLibrary(zig_gnu);
-    // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-    if (target.result.os.tag == .windows) {
-        exe.linkSystemLibrary("ntdll");
-        exe.linkSystemLibrary("kernel32");
-    }
-
-    const step = b.step("yabfc", "build/install the yabfc tool (Yet Another BrainFuck Compiler)");
-    step.dependOn(&install.step);
-
-    return exe;
+    return null;
 }
 
 fn addSecretGame(
@@ -633,52 +652,55 @@ fn addSecretGame(
     zig_start: *std.Build.Step.Compile,
     zig_posix: *std.Build.Step.Compile,
     zig_gnu: *std.Build.Step.Compile,
-) *std.Build.Step.Compile {
-    const repo = GitRepoStep.create(b, .{
-        .url = "https://github.com/ethinethin/Secret",
-        .sha = "8ec8442f84f8bed2cb3985455e7af4d1ce605401",
-        .branch = null,
-        .fetch_enabled = true,
-    });
+) ?*std.Build.Step.Compile {
+    // const repo = GitRepoStep.create(b, .{
+    //     .url = "https://github.com/ethinethin/Secret#8ec8442f84f8bed2cb3985455e7af4d1ce605401",
+    //     .branch = null,
+    //     .fetch_enabled = true,
+    // });
 
-    const exe = b.addExecutable(.{
-        .name = "secret",
-        .target = target,
-        .optimize = optimize,
-    });
-    const install = b.addInstallArtifact(exe, .{});
-    exe.step.dependOn(&repo.step);
-    const repo_path = repo.getPath(&exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    const sources = [_][]const u8{
-        "main.c", "inter.c", "input.c", "items.c", "rooms.c", "linenoise/linenoise.c",
-    };
-    for (sources) |src| {
-        files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+    if (b.lazyDependency("secret-game", .{})) |secret_dep| {
+        const exe = b.addExecutable(.{
+            .name = "secret",
+            .target = target,
+            .optimize = optimize,
+        });
+        const install = b.addInstallArtifact(exe, .{});
+        // exe.step.dependOn(&repo.step);
+        // const repo_path = repo.getPath(&exe.step);
+        // var files = std.ArrayList([]const u8).init(b.allocator);
+        const sources = [_][]const u8{
+            "main.c", "inter.c", "input.c", "items.c", "rooms.c", "linenoise/linenoise.c",
+        };
+        // for (sources) |src| {
+        //     files.append(b.pathJoin(&.{ repo_path, src })) catch unreachable;
+        // }
+        exe.addCSourceFiles(.{
+            .root = secret_dep.path(""),
+            .files = &sources,
+            .flags = &[_][]const u8{
+                "-std=c90",
+            },
+        });
+
+        exe.addIncludePath(b.path("inc/libc"));
+        exe.addIncludePath(b.path("inc/posix"));
+        exe.addIncludePath(b.path("inc/linux"));
+        exe.addIncludePath(b.path("inc/gnu"));
+        exe.linkLibrary(libc_only_std_static);
+        exe.linkLibrary(zig_start);
+        exe.linkLibrary(zig_posix);
+        exe.linkLibrary(zig_gnu);
+        // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
+        if (target.result.os.tag == .windows) {
+            exe.linkSystemLibrary("ntdll");
+            exe.linkSystemLibrary("kernel32");
+        }
+
+        const step = b.step("secret", "build/install the secret game");
+        step.dependOn(&install.step);
+
+        return exe;
     }
-    exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
-        .flags = &[_][]const u8{
-            "-std=c90",
-        },
-    });
-
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/linux" });
-    exe.addIncludePath(.{ .path = "inc/gnu" });
-    exe.linkLibrary(libc_only_std_static);
-    exe.linkLibrary(zig_start);
-    exe.linkLibrary(zig_posix);
-    exe.linkLibrary(zig_gnu);
-    // TODO: should libc_only_std_static and zig_start be able to add library dependencies?
-    if (target.result.os.tag == .windows) {
-        exe.linkSystemLibrary("ntdll");
-        exe.linkSystemLibrary("kernel32");
-    }
-
-    const step = b.step("secret", "build/install the secret game");
-    step.dependOn(&install.step);
-
-    return exe;
+    return null;
 }

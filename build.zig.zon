@@ -1,0 +1,37 @@
+.{
+    .name = "ziglibc",
+    .version = "0.0.1",
+    .paths = .{""},
+    .dependencies = .{
+        .@"tiny-regex-c" = .{
+            .url = "git+https://github.com/marler8997/tiny-regex-c#95ef2ad35d36783d789b0ade3178b30a942f085c",
+            .hash = "12200f37e89b53ddb28c5afc564a6092f4f62cc15cdec602532ff7671841d86a1a02",
+            .lazy = true,
+        },
+        .lua = .{
+            .url = "git+https://github.com/lua/lua#5d708c3f9cae12820e415d4f89c9eacbe2ab964b",
+            .hash = "122094d2699fd09a9d8d46414e3aa5ded6b39713ad54215da2125821092137342b28",
+            .lazy = true,
+        },
+        .cmph = .{
+            .url = "git+https://github.com/bonitao/cmph#abd5e1e17e4d51b3e24459ab9089dc0522846d0d",
+            .hash = "12203b28550f41bb268eab26103c43c6bc4cb32b2939e5420573ac0c1ac4a3593fdf",
+            .lazy = true,
+        },
+        .yacc = .{
+            .url = "git+https://github.com/ibara/yacc#1a4138ce2385ec676c6d374245fda5a9cd2fbee2",
+            .hash = "1220bb39eb5bfade87582a2acf5265c4f37f7b93d0c0b57015287dfd7701f9145ea0",
+            .lazy = true,
+        },
+        .yabfc = .{
+            .url = "git+https://github.com/julianneswinoga/yabfc#a789be25a0918d330b7a4de12db0d33e0785f244",
+            .hash = "122081a373be058cd09307a60e80edec1721ca13447e0c81749e7a0b0cd1b05dfb00",
+            .lazy = true,
+        },
+        .@"secret-game" = .{
+            .url = "git+https://github.com/ethinethin/Secret#8ec8442f84f8bed2cb3985455e7af4d1ce605401",
+            .hash = "1220be423b75a267f50a8c2e1046f0acffaf7cd7b6a6e16af20c6fb8ec8f41fb27b6",
+            .lazy = true,
+        },
+    },
+}

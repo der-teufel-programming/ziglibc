@@ -20,13 +20,14 @@ const BusyboxPrepStep = struct {
         result.*.step.dependOn(&repo.step);
         return result;
     }
-    fn make(step: *std.Build.Step, progress: *std.Progress.Node) !void {
-        _ = progress;
-        const self = @fieldParentPtr(BusyboxPrepStep, "step", step);
+    fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) !void {
+        _ = opts;
+        const self: *BusyboxPrepStep = @fieldParentPtr("step", step);
         const b = self.builder;
 
         std.log.warn("TODO: check config file timestamp to prevent unnecessary copy", .{});
-        var src_dir = try std.fs.cwd().openDir(b.pathJoin(&.{ b.build_root.path.?, "busybox" }), .{});
+        // var src_dir = try std.fs.cwd().openDir(b.pathJoin(&.{ b.build_root.path.?, "busybox" }), .{});
+        var src_dir = try b.build_root.handle.openDir("busybox", .{});
         defer src_dir.close();
         var dst_dir = try std.fs.cwd().openDir(self.repo_path, .{});
         defer dst_dir.close();
@@ -70,11 +71,11 @@ pub fn add(
             "-std=c99",
         },
     });
-    exe.addIncludePath(.{ .path = b.pathJoin(&.{ repo_path, "include" }) });
+    exe.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ repo_path, "include" }) });
 
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/linux" });
+    exe.addIncludePath(b.path("inc/libc"));
+    exe.addIncludePath(b.path("inc/posix"));
+    exe.addIncludePath(b.path("inc/linux"));
     exe.linkLibrary(libc_only_std_static);
     //exe.linkLibrary(zig_start);
     exe.linkLibrary(zig_posix);

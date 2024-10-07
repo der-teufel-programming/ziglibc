@@ -34,9 +34,9 @@ pub fn create(b: *std.Build, opt: struct {
     return result;
 }
 
-fn make(step: *std.Build.Step, progress: *std.Progress.Node) !void {
-    _ = progress;
-    const self = @fieldParentPtr(ProcessFileStep, "step", step);
+fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) !void {
+    _ = opts;
+    const self: *ProcessFileStep = @fieldParentPtr("step", step);
 
     if (try filecheck.leftFileIsNewer(self.out_filename, self.in_filename)) {
         return;
@@ -46,7 +46,7 @@ fn make(step: *std.Build.Step, progress: *std.Progress.Node) !void {
     defer arena.deinit();
     const content = std.fs.cwd().readFileAlloc(arena.allocator(), self.in_filename, std.math.maxInt(usize)) catch |err| {
         std.log.err("failed to read file '{s}' to process ({s})", .{ self.in_filename, @errorName(err) });
-        std.os.exit(0xff);
+        std.process.exit(0xff);
     };
     const tmp_filename = try std.fmt.allocPrint(arena.allocator(), "{s}.processing", .{self.out_filename});
     {

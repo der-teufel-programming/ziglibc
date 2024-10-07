@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 
 const c = @cImport({
     @cInclude("errno.h");
@@ -81,7 +82,7 @@ export fn write(fd: c_int, buf: [*]const u8, nbyte: usize) callconv(.C) isize {
         @panic("write not implemented on windows");
     }
     const rc = os.system.write(fd, buf, nbyte);
-    switch (os.errno(rc)) {
+    switch (posix.errno(rc)) {
         .SUCCESS => return @as(isize, @intCast(rc)),
         else => |e| {
             c.errno = @intFromEnum(e);
@@ -93,7 +94,7 @@ export fn write(fd: c_int, buf: [*]const u8, nbyte: usize) callconv(.C) isize {
 export fn read(fd: c_int, buf: [*]u8, len: usize) callconv(.C) isize {
     trace.log("read fd={} buf={*} len={}", .{ fd, buf, len });
     const rc = os.linux.read(fd, buf, len);
-    switch (os.errno(rc)) {
+    switch (posix.errno(rc)) {
         .SUCCESS => return @as(isize, @intCast(rc)),
         else => |e| {
             c.errno = @intFromEnum(e);
@@ -148,7 +149,7 @@ export fn mkostemp(template: [*:0]u8, suffixlen: c_int, flags: c_int) callconv(.
     while (true) : (attempt += 1) {
         randomizeTempFilename(rand_part);
         const fd = os.system.open(template, @as(u32, @intCast(flags | os.O.RDWR | os.O.CREAT | os.O.EXCL)), 0o600);
-        switch (os.errno(fd)) {
+        switch (posix.errno(fd)) {
             .SUCCESS => return @as(c_int, @intCast(fd)),
             else => |e| {
                 if (attempt >= max_attempts) {
@@ -235,7 +236,7 @@ export fn unlink(path: [*:0]const u8) callconv(.C) c_int {
     if (builtin.os.tag == .windows)
         @panic("windows unlink not implemented");
 
-    switch (os.errno(os.system.unlink(path))) {
+    switch (posix.errno(os.system.unlink(path))) {
         .SUCCESS => return 0,
         else => |e| {
             c.errno = @intFromEnum(e);
@@ -263,7 +264,7 @@ export fn isatty(fd: c_int) callconv(.C) c_int {
         @panic("isatty not supported on windows (yet?)");
 
     var size: c.winsize = undefined;
-    switch (os.errno(os.system.ioctl(fd, c.TIOCGWINSZ, @intFromPtr(&size)))) {
+    switch (posix.errno(os.system.ioctl(fd, c.TIOCGWINSZ, @intFromPtr(&size)))) {
         .SUCCESS => return 1,
         .BADF => {
             c.errno = c.ENOTTY;
@@ -277,13 +278,13 @@ export fn isatty(fd: c_int) callconv(.C) c_int {
 // sys/time
 // --------------------------------------------------------------------------------
 comptime {
-    std.debug.assert(@sizeOf(c.timespec) == @sizeOf(os.timespec));
+    std.debug.assert(@sizeOf(c.timespec) == @sizeOf(posix.timespec));
     if (builtin.os.tag != .windows) {
-        std.debug.assert(c.CLOCK_REALTIME == os.CLOCK.REALTIME);
+        std.debug.assert(c.CLOCK_REALTIME == posix.CLOCK.REALTIME);
     }
 }
 
-export fn clock_gettime(clk_id: c.clockid_t, tp: *os.timespec) callconv(.C) c_int {
+export fn clock_gettime(clk_id: c.clockid_t, tp: *posix.timespec) callconv(.C) c_int {
     if (builtin.os.tag == .windows) {
         if (clk_id == c.CLOCK_REALTIME) {
             var ft: os.windows.FILETIME = undefined;
@@ -292,8 +293,8 @@ export fn clock_gettime(clk_id: c.clockid_t, tp: *os.timespec) callconv(.C) c_in
             const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
             const ft_per_s = std.time.ns_per_s / 100;
             tp.* = .{
-                .tv_sec = @as(i64, @intCast(ft64 / ft_per_s)) + std.time.epoch.windows,
-                .tv_nsec = @as(c_long, @intCast(ft64 % ft_per_s)) * 100,
+                .sec = @as(i64, @intCast(ft64 / ft_per_s)) + std.time.epoch.windows,
+                .nsec = @as(c_long, @intCast(ft64 % ft_per_s)) * 100,
             };
             return 0;
         }
@@ -301,7 +302,7 @@ export fn clock_gettime(clk_id: c.clockid_t, tp: *os.timespec) callconv(.C) c_in
         std.debug.panic("clk_id {} not implemented on Windows", .{clk_id});
     }
 
-    switch (os.errno(os.system.clock_gettime(clk_id, tp))) {
+    switch (posix.errno(os.system.clock_gettime(clk_id, tp))) {
         .SUCCESS => return 0,
         else => |e| {
             c.errno = @intFromEnum(e);
@@ -349,7 +350,7 @@ export fn fstat(fd: c_int, buf: *c.struct_stat) c_int {
 export fn umask(mode: c.mode_t) callconv(.C) c.mode_t {
     trace.log("umask 0x{x}", .{mode});
     const old_mode = os.linux.syscall1(.umask, @as(usize, @intCast(mode)));
-    switch (os.errno(old_mode)) {
+    switch (posix.errno(old_mode)) {
         .SUCCESS => {},
         else => |e| std.debug.panic("umask syscall should never fail but got '{s}'", .{@tagName(e)}),
     }
@@ -379,7 +380,7 @@ export fn basename(path: ?[*:0]u8) callconv(.C) [*:0]u8 {
 // termios
 // --------------------------------------------------------------------------------
 export fn tcgetattr(fd: c_int, ios: *os.linux.termios) callconv(.C) c_int {
-    switch (os.errno(os.linux.tcgetattr(fd, ios))) {
+    switch (posix.errno(os.linux.tcgetattr(fd, ios))) {
         .SUCCESS => return 0,
         else => |errno| {
             c.errno = @intFromEnum(errno);
@@ -393,7 +394,7 @@ export fn tcsetattr(
     optional_actions: c_int,
     ios: *const os.linux.termios,
 ) callconv(.C) c_int {
-    switch (os.errno(os.linux.tcsetattr(fd, @as(os.linux.TCSA, @enumFromInt(optional_actions)), ios))) {
+    switch (posix.errno(os.linux.tcsetattr(fd, @as(os.linux.TCSA, @enumFromInt(optional_actions)), ios))) {
         .SUCCESS => return 0,
         else => |errno| {
             c.errno = @intFromEnum(errno);
@@ -425,7 +426,7 @@ export fn strcasecmp(a: [*:0]const u8, b: [*:0]const u8) callconv(.C) c_int {
 export fn _ioctlArgPtr(fd: c_int, request: c_ulong, arg_ptr: *anyopaque) c_int {
     trace.log("ioctl fd={} request=0x{x} arg={*}", .{ fd, request, arg_ptr });
     const rc = os.linux.ioctl(fd, @as(u32, @intCast(request)), @intFromPtr(arg_ptr));
-    switch (os.errno(rc)) {
+    switch (posix.errno(rc)) {
         .SUCCESS => return @as(c_int, @intCast(rc)),
         else => |errno| {
             c.errno = @intFromEnum(errno);
@@ -457,9 +458,9 @@ export fn select(
 // --------------------------------------------------------------------------------
 comptime {
     if (builtin.os.tag == .windows) {
-        @export(fileno, .{ .name = "_fileno" });
-        @export(isatty, .{ .name = "_isatty" });
-        @export(popen, .{ .name = "_popen" });
-        @export(pclose, .{ .name = "_pclose" });
+        @export(&fileno, .{ .name = "_fileno" });
+        @export(&isatty, .{ .name = "_isatty" });
+        @export(&popen, .{ .name = "_popen" });
+        @export(&pclose, .{ .name = "_pclose" });
     }
 }

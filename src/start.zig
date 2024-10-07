@@ -36,7 +36,7 @@ fn windowsArgsAlloc() [:null]?[*:0]u8 {
     var it = std.process.argsWithAllocator(tmp_arena.allocator()) catch |err| switch (err) {
         error.OutOfMemory => @panic(out_of_memory_msg),
         // TODO: would be nice to get the actual utf16 decode error name
-        error.InvalidCmdLine => @panic("Failed to decode command line"),
+        // error.InvalidCmdLine => @panic("Failed to decode command line"),
     };
     defer it.deinit();
     while (it.next()) |tmp_arg| {

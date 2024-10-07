@@ -1,6 +1,6 @@
 const std = @import("std");
-const build = std.Build;
-const CompileStep = build.Step.Compile;
+const Build = std.Build;
+const CompileStep = Build.Step.Compile;
 
 pub const LinkKind = enum { static, shared };
 pub const LibVariant = enum {
@@ -23,21 +23,21 @@ pub const ZigLibcOptions = struct {
     optimize: std.builtin.Mode,
 };
 
-fn relpath(comptime src_path: []const u8) std.Build.LazyPath {
-    if (comptime std.fs.path.dirname(@src().file)) |dir|
-        return .{ .path = dir ++ std.fs.path.sep_str ++ src_path };
-    return .{ .path = src_path };
-}
+// fn relpath(comptime src_path: []const u8) std.Build.LazyPath {
+//     if (comptime std.fs.path.dirname(@src().file)) |dir|
+//         return .{ .path = dir ++ std.fs.path.sep_str ++ src_path };
+//     return .{ .path = src_path };
+// }
 
 /// Provides a _start symbol that will call C main
 pub fn addZigStart(
-    builder: *build,
+    b: *Build,
     target: std.Build.ResolvedTarget,
     optimize: anytype,
 ) *CompileStep {
-    const lib = builder.addStaticLibrary(.{
+    const lib = b.addStaticLibrary(.{
         .name = "start",
-        .root_source_file = relpath("src" ++ std.fs.path.sep_str ++ "start.zig"),
+        .root_source_file = b.path("src/start.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -49,7 +49,7 @@ pub fn addZigStart(
 
 // Returns ziglibc as a CompileStep
 // Caller will also need to add the include path to get the C headers
-pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
+pub fn addLibc(b: *Build, opt: ZigLibcOptions) *CompileStep {
     const name = switch (opt.variant) {
         .only_std => "c-only-std",
         .only_posix => "c-only-posix",
@@ -59,23 +59,23 @@ pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
         .full => "cguana", // use cguana to avoid passing in '-lc' to zig which will
         // cause it to add the system libc headers
     };
-    const trace_options = builder.addOptions();
+    const trace_options = b.addOptions();
     trace_options.addOption(bool, "enabled", opt.trace);
 
-    const modules_options = builder.addOptions();
+    const modules_options = b.addOptions();
     modules_options.addOption(bool, "glibcstart", switch (opt.start) {
         .glibc => true,
         else => false,
     });
-    const index = relpath("src" ++ std.fs.path.sep_str ++ "lib.zig");
+    const index = b.path("src/lib.zig");
     const lib = switch (opt.link) {
-        .static => builder.addStaticLibrary(.{
+        .static => b.addStaticLibrary(.{
             .name = name,
             .root_source_file = index,
             .target = opt.target,
             .optimize = opt.optimize,
         }),
-        .shared => builder.addSharedLibrary(.{
+        .shared => b.addSharedLibrary(.{
             .name = name,
             .root_source_file = index,
             .target = opt.target,
@@ -100,10 +100,10 @@ pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
     };
     modules_options.addOption(bool, "cstd", include_cstd);
     if (include_cstd) {
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "printf.c"), .flags = &c_flags });
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "scanf.c"), .flags = &c_flags });
+        lib.addCSourceFile(.{ .file = b.path("src" ++ std.fs.path.sep_str ++ "printf.c"), .flags = &c_flags });
+        lib.addCSourceFile(.{ .file = b.path("src" ++ std.fs.path.sep_str ++ "scanf.c"), .flags = &c_flags });
         if (opt.target.result.os.tag == .linux) {
-            lib.addAssemblyFile(relpath("src/linux/jmp.s"));
+            lib.addAssemblyFile(b.path("src/linux/jmp.s"));
         }
     }
     const include_posix = switch (opt.variant) {
@@ -112,7 +112,7 @@ pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
     };
     modules_options.addOption(bool, "posix", include_posix);
     if (include_posix) {
-        lib.addCSourceFile(.{ .file = relpath("src" ++ std.fs.path.sep_str ++ "posix.c"), .flags = &c_flags });
+        lib.addCSourceFile(.{ .file = b.path("src" ++ std.fs.path.sep_str ++ "posix.c"), .flags = &c_flags });
     }
     const include_linux = switch (opt.variant) {
         .only_linux, .full => true,
@@ -120,8 +120,8 @@ pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
     };
     modules_options.addOption(bool, "linux", include_linux);
     if (include_cstd or include_posix) {
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "libc"));
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "posix"));
+        lib.addIncludePath(b.path("inc" ++ std.fs.path.sep_str ++ "libc"));
+        lib.addIncludePath(b.path("inc" ++ std.fs.path.sep_str ++ "posix"));
     }
     const include_gnu = switch (opt.variant) {
         .only_gnu, .full => true,
@@ -129,7 +129,7 @@ pub fn addLibc(builder: *std.Build, opt: ZigLibcOptions) *CompileStep {
     };
     modules_options.addOption(bool, "gnu", include_gnu);
     if (include_gnu) {
-        lib.addIncludePath(relpath("inc" ++ std.fs.path.sep_str ++ "gnu"));
+        lib.addIncludePath(b.path("inc" ++ std.fs.path.sep_str ++ "gnu"));
     }
     return lib;
 }

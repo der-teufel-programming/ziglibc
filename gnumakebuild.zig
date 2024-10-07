@@ -82,7 +82,7 @@ pub fn addGnuMake(
         files.append(b.pathJoin(&.{ repo_path, "src", src })) catch unreachable;
     }
 
-    exe.addIncludePath(.{ .path = b.pathJoin(&.{ repo_path, "src" }) });
+    exe.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ repo_path, "src" }) });
     exe.addCSourceFiles(.{
         .files = files.toOwnedSlice() catch unreachable,
         .flags = &[_][]const u8{
@@ -107,10 +107,10 @@ pub fn addGnuMake(
         },
     });
 
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/gnu" });
-    exe.addIncludePath(.{ .path = "inc/alloca" });
+    exe.addIncludePath(b.path("inc/libc"));
+    exe.addIncludePath(b.path("inc/posix"));
+    exe.addIncludePath(b.path("inc/gnu"));
+    exe.addIncludePath(b.path("inc/alloca"));
     exe.linkLibrary(libc_only_std_static);
     exe.linkLibrary(zig_start);
     exe.linkLibrary(zig_posix);

@@ -15,7 +15,7 @@ pub const ShaCheck = enum {
             .warn => std.log.warn(fmt, args),
             .err => {
                 std.log.err(fmt, args);
-                std.os.exit(0xff);
+                std.process.exit(0xff);
             },
         }
     }
@@ -81,9 +81,9 @@ fn hasDependency(step: *const std.Build.Step, dep_candidate: *const std.Build.St
     return false;
 }
 
-fn make(step: *std.Build.Step, prog_node: *std.Progress.Node) !void {
-    _ = prog_node;
-    const self = @fieldParentPtr(GitRepoStep, "step", step);
+fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) !void {
+    _ = opts;
+    const self: *GitRepoStep = @fieldParentPtr("step", step);
 
     std.fs.accessAbsolute(self.path, .{}) catch {
         const branch_args = if (self.branch) |b| &[2][]const u8{ " -b ", b } else &[2][]const u8{ "", "" };
@@ -97,7 +97,7 @@ fn make(step: *std.Build.Step, prog_node: *std.Progress.Node) !void {
                 self.path,
                 self.sha,
             });
-            std.os.exit(1);
+            std.process.exit(1);
         }
 
         {
@@ -134,7 +134,7 @@ fn checkSha(self: GitRepoStep) !void {
         return;
 
     const result: union(enum) { failed: anyerror, output: []const u8 } = blk: {
-        const result = std.ChildProcess.run(.{
+        const result = std.process.Child.run(.{
             .allocator = self.step.owner.allocator,
             .argv = &[_][]const u8{
                 "git",
@@ -144,7 +144,7 @@ fn checkSha(self: GitRepoStep) !void {
                 "HEAD",
             },
             .cwd = self.step.owner.build_root.path,
-            .env_map = self.step.owner.env_map,
+            .env_map = &self.step.owner.graph.env_map,
         }) catch |e| break :blk .{ .failed = e };
         try std.io.getStdErr().writer().writeAll(result.stderr);
         switch (result.term) {
@@ -182,23 +182,23 @@ fn run(builder: *std.Build, argv: []const []const u8) !void {
         std.log.info("[RUN] {s}", .{msg.items});
     }
 
-    var child = std.ChildProcess.init(argv, builder.allocator);
+    var child = std.process.Child.init(argv, builder.allocator);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
     child.cwd = builder.build_root.path;
-    child.env_map = builder.env_map;
+    child.env_map = &builder.graph.env_map;
 
     try child.spawn();
     const result = try child.wait();
     switch (result) {
         .Exited => |code| if (code != 0) {
             std.log.err("git clone failed with exit code {}", .{code});
-            std.os.exit(0xff);
+            std.process.exit(0xff);
         },
         else => {
             std.log.err("git clone failed with: {}", .{result});
-            std.os.exit(0xff);
+            std.process.exit(0xff);
         },
     }
 }

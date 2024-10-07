@@ -30,9 +30,9 @@ const NcursesPrepStep = struct {
         result.*.step.dependOn(&repo.step);
         return result;
     }
-    fn make(step: *std.Build.Step, progress: *std.Progress.Node) !void {
-        _ = progress;
-        const self = @fieldParentPtr(NcursesPrepStep, "step", step);
+    fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) !void {
+        _ = opts;
+        const self: *NcursesPrepStep = @fieldParentPtr("step", step);
         //try self.generateCuresesH();
         try self.generateNcursesDefH();
     }
@@ -51,7 +51,7 @@ const NcursesPrepStep = struct {
         defer arena.deinit();
         const content = std.fs.cwd().readFileAlloc(arena.allocator(), self.defs_h_src, std.math.maxInt(usize)) catch |err| {
             std.log.err("failed to read file '{s}' to process ({s})", .{ self.defs_h_src, @errorName(err) });
-            std.os.exit(0xff);
+            std.process.exit(0xff);
         };
 
         const tmp_filename = try std.fmt.allocPrint(arena.allocator(), "{s}.processing", .{self.defs_h_dst});
@@ -64,11 +64,11 @@ const NcursesPrepStep = struct {
             try writer.writeAll("#ifndef NC_DEFINE_H\n");
             try writer.writeAll("#define NC_DEFINE_H\n");
 
-            var it = std.mem.split(u8, content, "\n");
+            var it = std.mem.splitScalar(u8, content, '\n');
             while (it.next()) |line_untrimmed| {
                 const line = std.mem.trim(u8, line_untrimmed, " \t\r");
                 if (line.len == 0 or line[0] == '#') continue;
-                var field_it = std.mem.tokenize(u8, line, " \t");
+                var field_it = std.mem.tokenizeAny(u8, line, " \t");
                 const name = field_it.next().?;
                 const optional_value = field_it.next();
                 try writer.print("\n#ifndef {s}\n", .{name});
@@ -154,22 +154,23 @@ pub fn add(
     const install = b.addInstallArtifact(exe, .{});
     exe.step.dependOn(&prep.step);
     const repo_path = repo.getPath(&exe.step);
-    var files = std.ArrayList([]const u8).init(b.allocator);
-    for ([_][]const u8{"lib_initscr.c"}) |src| {
-        files.append(b.pathJoin(&.{ repo_path, "ncurses", "base", src })) catch unreachable;
-    }
+    // var files = std.ArrayList([]const u8).init(b.allocator);
+    // for ([_][]const u8{"lib_initscr.c"}) |src| {
+    //     files.append(b.pathJoin(&.{ repo_path, "ncurses", "base", src })) catch unreachable;
+    // }
     exe.addCSourceFiles(.{
-        .files = files.toOwnedSlice() catch unreachable,
+        .root = .{ .cwd_relative = repo_path },
+        .files = &.{"ncurses/base/lib_initscr.c"},
         .flags = &[_][]const u8{
             "-std=c99",
         },
     });
-    exe.addIncludePath(.{ .path = b.pathJoin(&.{ repo_path, "include" }) });
-    exe.addIncludePath(.{ .path = b.pathJoin(&.{ repo_path, "ncurses" }) });
+    exe.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ repo_path, "include" }) });
+    exe.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ repo_path, "ncurses" }) });
 
-    exe.addIncludePath(.{ .path = "inc/libc" });
-    exe.addIncludePath(.{ .path = "inc/posix" });
-    exe.addIncludePath(.{ .path = "inc/linux" });
+    exe.addIncludePath(b.path("inc/libc"));
+    exe.addIncludePath(b.path("inc/posix"));
+    exe.addIncludePath(b.path("inc/linux"));
     //exe.addIncludePath(.{.path = "inc/gnu"});
     exe.linkLibrary(libc_only_std_static);
     //exe.linkLibrary(zig_start);

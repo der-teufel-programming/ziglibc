@@ -9,14 +9,14 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
 
 pub fn fmtStr(s: anytype) FmtStr {
     switch (@typeInfo(@TypeOf(s))) {
-        .Pointer => |info| switch (info.size) {
+        .pointer => |info| switch (info.size) {
             .Slice => return FmtStr.initSlice(s),
             .Many => if (info.sentinel) |_| {
                 return FmtStr.initSentinel(s);
             },
             else => {},
         },
-        .Optional => return fmtStr(s orelse return FmtStr.initNull()),
+        .optional => return fmtStr(s orelse return FmtStr.initNull()),
         else => {},
     }
     @compileError("fmtStr for type " ++ @typeName(@TypeOf(s)) ++ " is not implemented");
